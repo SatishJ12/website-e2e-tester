@@ -1,0 +1,5 @@
+SiteName,RowType,Url,UserFieldSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector,LogoutMenuSelector = #react-burger-menu-btn,LogoutSelector = #logout_sidebar_link
+SauceDemo,Login,https://www.saucedemo.com/,#user-name,#password,#login-button,.title,,,,,,
+SauceDemo,Page,,,,,,Products,https://www.saucedemo.com/inventory.html,Products,.title,,
+SauceDemo,Page,,,,,,Cart,https://www.saucedemo.com/cart.html,Your Cart,.title,,
+SauceDemo,Page,,,,,,Checkout,https://www.saucedemo.com/checkout-step-one.html,Checkout: Your Information,.title,,
