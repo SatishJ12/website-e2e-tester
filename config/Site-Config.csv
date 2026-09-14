@@ -1,7 +1,7 @@
-SiteName,RowType,Url,UserFieldSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector,LogoutMenuSelector,LogoutSelector
-SiteA,Login,https://sitea.example.com/login,#username,#password,#loginBtn,.dashboard-welcome,,,,,,
-SiteA,Page,,,,,,Dashboard,https://sitea.example.com/dashboard,Dashboard,h1.page-title,Overview,h2.section-title
-SiteA,Page,,,,,,Reports,https://sitea.example.com/reports,Reports,h1.page-title,Monthly Summary,h2.section-title
-SiteB,Login,https://siteb.example.com/signin,input[name='email'],input[name='pass'],button[type='submit'],#userMenu,,,,,,
-SiteB,Page,,,,,,Home,https://siteb.example.com/home,Home,h1,,,
-SiteB,Page,,,,,,Settings,https://siteb.example.com/settings,Settings,h1,Account,h3
+SiteName,RowType,Url,UserFieldSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,LogoutMenuSelector,LogoutSelector,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector
+SiteA,Login,https://sitea.example.com/login,#username,#password,#loginBtn,.dashboard-welcome,,,,,,,,
+SiteA,Page,,,,,,,,Dashboard,https://sitea.example.com/dashboard,Dashboard,h1.page-title,Overview,h2.section-title
+SiteA,Page,,,,,,,,Reports,https://sitea.example.com/reports,Reports,h1.page-title,Monthly Summary,h2.section-title
+SiteB,Login,https://siteb.example.com/signin,input[name='email'],input[name='pass'],button[type='submit'],#userMenu,,,,,,,,
+SiteB,Page,,,,,,,,Home,https://siteb.example.com/home,Home,h1,,,
+SiteB,Page,,,,,,,,Settings,https://siteb.example.com/settings,Settings,h1,Account,h3

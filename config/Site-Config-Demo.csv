@@ -1,5 +1,17 @@
-SiteName,RowType,Url,UserFieldSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector,LogoutMenuSelector = #react-burger-menu-btn,LogoutSelector = #logout_sidebar_link
-SauceDemo,Login,https://www.saucedemo.com/,#user-name,#password,#login-button,.title,,,,,,
-SauceDemo,Page,,,,,,Products,https://www.saucedemo.com/inventory.html,Products,.title,,
-SauceDemo,Page,,,,,,Cart,https://www.saucedemo.com/cart.html,Your Cart,.title,,
-SauceDemo,Page,,,,,,Checkout,https://www.saucedemo.com/checkout-step-one.html,Checkout: Your Information,.title,,
+SiteName,RowType,Url,UserFieldSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,LogoutMenuSelector,LogoutSelector,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector
+SauceDemo,Login,https://www.saucedemo.com/,#user-name,#password,#login-button,.title,#react-burger-menu-btn,#logout_sidebar_link,,,,,,
+SauceDemo,Page,,,,,,,,Products,https://www.saucedemo.com/inventory.html,Products,.title,,
+SauceDemo,Page,,,,,,,,Cart,https://www.saucedemo.com/cart.html,Your Cart,.title,,
+SauceDemo,Page,,,,,,,,Checkout,https://www.saucedemo.com/checkout-step-one.html,Checkout: Your Information,.title,,
+PracticeTestAutomation,Login,https://practicetestautomation.com/practice-test-login/,#username,#password,#submit,h1,,"//a[contains(text(),'Log out')]",,,,,,
+PracticeTestAutomation,Page,,,,,,,,LoggedInSuccessfully,https://practicetestautomation.com/logged-in-successfully/,Logged In Successfully,h1,,
+ExpandTesting,Login,https://practice.expandtesting.com/login,input[name='username'],input[name='password'],button[type='submit'],#flash,,a[href='/logout'],,,,,,
+ExpandTesting,Page,,,,,,,,Checkboxes,https://practice.expandtesting.com/checkboxes,Checkboxes,h1,,
+TheInternet,Login,https://the-internet.herokuapp.com/login,#username,#password,button[type='submit'],#content h2,,a[href='/logout'],,,,,,
+TheInternet,Page,,,,,,,,SecureArea,https://the-internet.herokuapp.com/secure,Secure Area,#content h2,Welcome to the Secure Area,h4.subheader
+TheInternet,Page,,,,,,,,Checkboxes,https://the-internet.herokuapp.com/checkboxes,Checkboxes,h3,,
+TheInternet,Page,,,,,,,,Dropdown,https://the-internet.herokuapp.com/dropdown,Dropdown List,h3,,
+OrangeHRM,Login,https://opensource-demo.orangehrmlive.com/web/index.php/auth/login,input[name='username'],input[name='password'],button[type='submit'],//h6[text()='Dashboard'],.oxd-userdropdown-tab,//a[text()='Logout'],,,,,,
+OrangeHRM,Page,,,,,,,,Dashboard,https://opensource-demo.orangehrmlive.com/web/index.php/dashboard/index,Dashboard,//h6[text()='Dashboard'],,
+ParaBank,Login,https://para.testar.org/parabank/index.htm,input[name='username'],input[name='password'],input[value='Log In'],h1.title,,a[href='logout.htm'],,,,,,
+ParaBank,Page,,,,,,,,AccountsOverview,https://para.testar.org/parabank/overview.htm,Accounts Overview,h1.title,,
