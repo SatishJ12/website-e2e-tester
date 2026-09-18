@@ -50,6 +50,9 @@ Edit `Site-Config.csv` — one `Login` row per site plus one `Page` row per page
 | `IframeSelector` | No | Selector for an `<iframe>` wrapping the login form, if present |
 | `LogoutMenuSelector` | No | Selector for a menu/avatar that must be opened before the logout link is visible |
 | `LogoutSelector` | No | Selector for the logout link/button. Leave both this and `LogoutMenuSelector` blank to skip logout testing |
+| `LogoutPageUrl` | No | A page known to have the logout control on it. When set, the script navigates there first before attempting logout — needed whenever the last `Page` row might leave the browser somewhere without a logout link (a standalone widget/settings page with no shared nav). Without it, logout is attempted on whatever page the last `Page` row left off on |
+| `FooterCaptureSelector` | No | Selector for text to **capture and log** on the post-login landing page (e.g. a footer server tag like "S09"). Not compared to any expected value — see Cookbook below |
+| `CaptureFooterScreenshot` | No | Set to `Yes` to take a **dedicated screenshot** of the bottom of the post-login page (scrolls down first), saved as its own image and embedded in Word separately from the normal full-page shot. Use this when the footer *itself* is the test case — see Cookbook below |
 
 ### Column reference — `Page` rows
 | Column | Required? | Purpose |
@@ -59,6 +62,8 @@ Edit `Site-Config.csv` — one `Login` row per site plus one `Page` row per page
 | `PageUrl` | Yes | Direct URL to navigate to (must work once logged in) |
 | `HeaderSelector` / `ExpectedHeader` | No | Selector + text to verify a heading matches. Leave both blank for a screenshot-only check with no text validation |
 | `SubHeaderSelector` / `ExpectedSubHeader` | No | Same idea, for a secondary heading |
+| `FooterCaptureSelector` | No | Selector for text to **capture and log** on this page (e.g. a footer server/instance tag). Not compared to any expected value — see Cookbook below |
+| `CaptureFooterScreenshot` | No | Set to `Yes` to take a dedicated screenshot of the bottom of this page, in addition to the normal full-page shot — see Cookbook below |
 
 Every selector column above (on both row types) accepts any of the three syntaxes below — mix and match freely per field, per site.
 
@@ -117,7 +122,24 @@ UserFieldSelector: table#loginTable tr:first-child input[name='username']
 Simple link, always visible:      LogoutSelector: a[href='/logout']
 Behind a menu/avatar first:       LogoutMenuSelector: .user-avatar   |   LogoutSelector: a[href='/logout']
 No id, only visible text:         LogoutSelector: //a[contains(text(),'Log out')]
+Only reachable from one page:     LogoutPageUrl: https://example.com/dashboard   |   LogoutSelector: a[href='/logout']
 ```
+
+**Capturing a footer/server tag that legitimately varies** (e.g. "S09", "S14" — which server or instance answered the request) — this is *different* from `HeaderSelector`/`ExpectedHeader`, which fail the row if the text doesn't match an exact expected value. `FooterCaptureSelector` never causes a Failure; it just records whatever text it finds (or `(not found)` if the selector doesn't match, or blank if the column is empty) into a new `CapturedInfo` field shown in both the Excel report and the Word report for that row:
+```
+FooterCaptureSelector: footer .server-tag
+FooterCaptureSelector: //footer//span[contains(@class,'instance-id')]
+FooterCaptureSelector: #footerPanel                 ← captures the whole footer block's text if there's no single dedicated element
+```
+Set it on a `Login` row to capture it once, right after login; set it on any `Page` row to capture it on that specific page (useful if the tag can differ page to page, e.g. if pages are served by different backend instances). Leave it blank anywhere you don't need it — it's fully optional and off by default.
+
+Whenever `FooterCaptureSelector` finds something, that value is also folded into the **screenshot filenames** for that row, so you can tell which server answered just by looking at the `Screenshots\` folder — no need to open the report: `SiteA_00_Login_S09.png`, `SiteA_Dashboard_S14.png`, `SiteA_Dashboard_Footer_S14.png` (if `CaptureFooterScreenshot` is also set). If nothing is captured (selector blank, or not found), filenames fall back to the plain form (`SiteA_00_Login.png`, `SiteA_Dashboard.png`).
+
+**Footer screenshot as its own test step** (different from the text capture above — use this when the footer's *appearance*, not just its text, is what needs checking, or you just want a dedicated bottom-of-page image without picking apart selectors):
+```
+CaptureFooterScreenshot: Yes
+```
+Set it on a `Login` row and/or any `Page` row. When `Yes`, the script scrolls to the bottom of that page and takes a separate screenshot of just that view (`{Site}_{Page}_Footer.png` in the `Screenshots\` folder), on top of the normal full-page screenshot it always takes. In `TestReport.docx`, this image appears right under the main screenshot for that row, labeled "Footer screenshot". In `TestResults.xlsx`, a `FooterScreenshotCaptured` column shows `Yes` for any row where it ran, so you can filter/scan for them quickly. Leave it blank (the default) anywhere you don't need the extra shot.
 
 ### Finding selectors via DevTools
 Open the page in Chrome, right-click the element → **Inspect**, right-click the highlighted HTML in the Elements panel → **Copy** → **Copy selector**. To check whether a field sits inside an iframe or shadow DOM: look at what wraps it in the Elements panel — an `<iframe>` tag above it means you need `IframeSelector`; a `#shadow-root` node means you need the `>>>` chain syntax instead.
@@ -151,9 +173,9 @@ Add `-Headless:$false` any time you want to watch the browser while debugging se
 
 ## Output
 Each run creates a timestamped folder containing:
-- `TestResults.xlsx` — Site, Page, URL, Status (Success/Failure/Error), Timestamp, Error message. Rows include LOGIN, one per configured Page, and LOGOUT (if configured).
-- `TestReport.docx` — one section per site, one sub-section per row, with the screenshot and any mismatch note
-- `Screenshots\` — one PNG per step: pre-login page, (for two-step logins) the screen right after Continue is clicked, post-login landing page, each tested page (headers/subheaders visible in-frame), and the post-logout page if logout is configured. Every screenshot is **full-page** (the browser window is temporarily resized to the page's full scroll height before capture), so long pages are captured in their entirety, not just what's visible on screen.
+- `TestResults.xlsx` — Site, Page, URL, Status (Success/Failure/Error), Timestamp, Duration, **CapturedInfo** (footer/server tag text, if `FooterCaptureSelector` is configured for that row — blank otherwise), **FooterScreenshotCaptured** (`Yes` if `CaptureFooterScreenshot` was set for that row — blank otherwise), Error message. Rows include LOGIN, one per configured Page, and LOGOUT (if configured).
+- `TestReport.docx` — one section per site, one sub-section per row, with the URL/duration line, a captured-info line (if `FooterCaptureSelector` is configured for that row), the main screenshot, a separate footer screenshot (if `CaptureFooterScreenshot` is configured for that row), and any mismatch note
+- `Screenshots\` — one PNG per step: pre-login page, (for two-step logins) the screen right after Continue is clicked, post-login landing page, each tested page (headers/subheaders visible in-frame), and the post-logout page if logout is configured, plus a `_Footer.png` for any row with `CaptureFooterScreenshot: Yes`. Every full-page screenshot is captured with the browser window temporarily resized to the page's full scroll height, so long pages are captured in their entirety, not just what's visible on screen.
 
 ## Status meanings
 - **Success** — page loaded and header/subheader (if checked) matched
@@ -240,6 +262,7 @@ Wrap the `.ps1` call in a Windows Task Scheduler job so it can run on a timer in
 | A page row always comes back `Error: element not found` even though the page loads fine | The CSS selector for `HeaderSelector`/`SubHeaderSelector` doesn't match the real page (site markup changed, or selector was copied wrong). | Re-run with `-Headless:$false` to watch it, and re-copy the selector from the browser's Inspect panel (right-click element → Inspect → right-click the HTML → Copy → Copy selector). |
 | Login always shows `Failure` even with correct credentials | `PostLoginCheckSelector` doesn't match anything on the real post-login page, or the page takes longer than the fixed 2-3 second wait to load. | Verify the selector exists on the real logged-in page; if the site is just slow, increase the `Start-Sleep -Seconds 3` after the login click. |
 | Chrome opens but is stuck on a blank/unfilled login page for a long time | Not actually stuck — `Find-SeElement` waits up to 15 seconds per element, and every run pauses for the console credential prompt before the browser even opens. | Check whether `chrome.exe`/`chromedriver.exe` are still using CPU in Task Manager (still working) vs fully idle (actually frozen), and check the console for a waiting `Username:`/`Password:` prompt. Give it up to 30–45 seconds before assuming it's hung. |
+| LOGOUT step times out with `element not found`, even though the site works fine and logout definitely exists somewhere on it | The logout control only lives on certain pages (e.g. a dashboard/account page), but the last `Page` row visited left the browser on a different page (a standalone widget/settings page) with no shared navigation — LOGOUT always runs on whatever page the last `Page` row ended on unless told otherwise. | Set `LogoutPageUrl` on that site's Login row to a page you know has the logout control — the script will navigate there before attempting logout. |
 
 ### Microsoft Word (report generation)
 | Symptom | Root cause | Fix |

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>E2E Selector Test Fixture</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666666; --border: #dddddd;
+    --card: #f7f7f7; --accent: #2563eb; --success-bg: #e8f5e9; --success-fg: #1b5e20;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17181a; --fg: #f0f0f0; --muted: #a0a0a0; --border: #3a3b3d;
+      --card: #232426; --accent: #6ea8fe; --success-bg: #123a1c; --success-fg: #8fe0a0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17181a; --fg: #f0f0f0; --muted: #a0a0a0; --border: #3a3b3d;
+    --card: #232426; --accent: #6ea8fe; --success-bg: #123a1c; --success-fg: #8fe0a0;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, Segoe UI, sans-serif; margin: 0; padding: 2rem 1rem; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 500; }
+  p.lead { color: var(--muted); font-size: 14px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; margin: 1.5rem 0; overflow-x: auto; }
+  section h2 { font-size: 17px; font-weight: 500; margin-top: 0; }
+  section p.desc { color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; }
+  input[type=text], input[type=password] { width: 100%; max-width: 280px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 14px; }
+  button { margin-top: 14px; padding: 8px 16px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+  .welcome { display: none; background: var(--success-bg); color: var(--success-fg); padding: 12px 16px; border-radius: 8px; margin-top: 12px; }
+  .welcome h3 { margin: 0 0 6px; font-size: 15px; }
+  iframe { width: 100%; height: 260px; border: 1px dashed var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>E2E selector test fixture</h1>
+  <p class="lead">Three self-contained login widgets for validating iframe, shadow-DOM, and two-step login handling. Any non-empty username/password "logs in" &mdash; there is no real backend, this only exercises DOM/selector mechanics.</p>
+
+  <section>
+    <h2>1. Iframe-embedded login</h2>
+    <p class="desc">Login form lives inside an &lt;iframe&gt;; everything after login is on the main page (mirrors a real identity-provider iframe pattern).</p>
+    <iframe id="loginFrame" srcdoc="
+      <html><body style='font-family:-apple-system,sans-serif;padding:12px;margin:0;'>
+      <label style='font-size:13px;display:block;margin-bottom:4px;'>Username</label>
+      <input id=&quot;username&quot; type=&quot;text&quot; style='width:100%;box-sizing:border-box;padding:6px 8px;'>
+      <label style='font-size:13px;display:block;margin:8px 0 4px;'>Password</label>
+      <input id=&quot;password&quot; type=&quot;password&quot; style='width:100%;box-sizing:border-box;padding:6px 8px;'>
+      <br><button id=&quot;loginBtn&quot; style='margin-top:10px;padding:6px 14px;' onclick=&quot;
+        var u=document.getElementById('username').value;
+        var p=document.getElementById('password').value;
+        if(u && p){
+          window.parent.document.getElementById('iframeWelcome').style.display='block';
+        }
+      &quot;>Sign In</button>
+      </body></html>
+    "></iframe>
+    <div id="iframeWelcome" class="welcome">
+      <h3 id="welcome">Welcome! You are logged in.</h3>
+      <button class="secondary" id="logoutBtn" onclick="
+        document.getElementById('iframeWelcome').style.display='none';
+      ">Log out</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Shadow DOM login</h2>
+    <p class="desc">Login form and post-login content both live inside a web component's shadow root.</p>
+    <custom-login-widget></custom-login-widget>
+  </section>
+
+  <section>
+    <h2>3. Two-step login</h2>
+    <p class="desc">Username first, then Continue reveals a separate password step.</p>
+    <div id="tsStep1">
+      <label>Username</label>
+      <input id="tsUsername" type="text">
+      <br><button id="tsContinueBtn" onclick="
+        document.getElementById('tsStep1').style.display='none';
+        document.getElementById('tsStep2').style.display='block';
+      ">Continue</button>
+    </div>
+    <div id="tsStep2" style="display:none;">
+      <label>Password</label>
+      <input id="tsPassword" type="password">
+      <br><button id="tsLoginBtn" onclick="
+        var p=document.getElementById('tsPassword').value;
+        if(p){
+          document.getElementById('tsStep2').style.display='none';
+          document.getElementById('tsWelcomeBox').style.display='block';
+        }
+      ">Sign In</button>
+    </div>
+    <div id="tsWelcomeBox" class="welcome">
+      <h3 id="tsWelcome">Welcome! You are logged in.</h3>
+      <button class="secondary" id="tsLogoutBtn" onclick="
+        document.getElementById('tsWelcomeBox').style.display='none';
+        document.getElementById('tsStep1').style.display='block';
+        document.getElementById('tsUsername').value='';
+        document.getElementById('tsPassword').value='';
+      ">Log out</button>
+    </div>
+  </section>
+</div>
+
+<script>
+class CustomLoginWidget extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = `
+      <style>
+        div.form label { display:block; font-size:13px; margin:10px 0 4px; }
+        div.form input { width:100%; max-width:280px; box-sizing:border-box; padding:8px 10px; border:1px solid #ccc; border-radius:6px; font-size:14px; }
+        div.form button { margin-top:14px; padding:8px 16px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; font-size:14px; cursor:pointer; }
+        div.welcome { display:none; background:#e8f5e9; color:#1b5e20; padding:12px 16px; border-radius:8px; margin-top:12px; }
+        div.welcome button { margin-top:8px; padding:6px 14px; border:1px solid #ccc; background:transparent; border-radius:6px; cursor:pointer; }
+      </style>
+      <div class="form" id="form">
+        <label>Username</label>
+        <input id="username" type="text">
+        <label>Password</label>
+        <input id="password" type="password">
+        <br><button id="loginBtn">Sign In</button>
+      </div>
+      <div class="welcome" id="welcomeBox">
+        <div id="shadowWelcome">Welcome! You are logged in.</div>
+        <button id="shadowLogoutBtn">Log out</button>
+      </div>
+    `;
+    const form = root.getElementById('form');
+    const welcomeBox = root.getElementById('welcomeBox');
+    root.getElementById('loginBtn').addEventListener('click', () => {
+      const u = root.getElementById('username').value;
+      const p = root.getElementById('password').value;
+      if (u && p) {
+        form.style.display = 'none';
+        welcomeBox.style.display = 'block';
+      }
+    });
+    root.getElementById('shadowLogoutBtn').addEventListener('click', () => {
+      welcomeBox.style.display = 'none';
+      form.style.display = 'block';
+      root.getElementById('username').value = '';
+      root.getElementById('password').value = '';
+    });
+  }
+}
+customElements.define('custom-login-widget', CustomLoginWidget);
+</script>
+</body>
+</html>

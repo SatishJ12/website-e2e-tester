@@ -11,7 +11,7 @@
 
 .USAGE
     .\Run-WebsiteE2ETests.ps1 -ConfigPath .\Site-Config.csv
-    Prompts for username/password every run, for every site — nothing is
+    Prompts for username/password every run, for every site - nothing is
     saved to disk between runs.
 #>
 
@@ -38,6 +38,38 @@ if (-not (Test-Path $ConfigPath)) {
 }
 $AllRows = Import-Csv $ConfigPath
 $Results = New-Object System.Collections.Generic.List[object]
+
+
+# Captures (does NOT assert/compare) the text of an element such as a footer
+# server tag ("S09", "S14", etc.) that legitimately varies run to run and
+# site to site. Returns the trimmed text, or "" if the selector is blank,
+# the element isn't found, or anything else goes wrong - this must never
+# throw and must never affect Success/Failure/Error status.
+function Get-SeCapturedText {
+    param($Driver, [string]$Selector, [double]$Timeout = 5)
+    if (-not $Selector) { return "" }
+    try {
+        $el = Find-SeElementAny -Driver $Driver -Selector $Selector -Timeout $Timeout
+        if ($el -and $el.Text) { return $el.Text.Trim() }
+        return ""
+    } catch {
+        return "(not found)"
+    }
+}
+
+
+# Turns captured text (e.g. "S09") into something safe to put in a filename.
+# Returns "" for blank/whitespace-only/"(not found)" input, so callers can
+# just check for a non-empty result before adding it to a filename.
+function Get-CaptureFileTag {
+    param([string]$Text)
+    if (-not $Text) { return "" }
+    $Text = $Text.Trim()
+    if (-not $Text -or $Text -eq '(not found)') { return "" }
+    $tag = ($Text -replace '[^\w\-]', '_').Trim('_')
+    if ($tag.Length -gt 30) { $tag = $tag.Substring(0, 30) }   # keep filenames sane if the captured text is a long sentence
+    return $tag
+}
 
 function Get-SiteCredential {
     param([string]$SiteName)
@@ -116,6 +148,25 @@ function Invoke-SeFullPageScreenshot {
     }
 }
 
+# Takes a screenshot of just the bottom of the page (scrolls to
+# document.body.scrollHeight first, then a normal viewport screenshot) - use
+# this when the footer itself, not the whole page, is the thing being
+# checked. Returns "" (and logs nothing) if CaptureFooterScreenshot isn't
+# set to "Yes" for this row, so calling it is safe/no-op by default.
+function Invoke-SeFooterScreenshot {
+    param($Driver, [string]$Path, [string]$CaptureFlag)
+    if ($CaptureFlag -ne 'Yes') { return "" }
+    try {
+        $Driver.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);") | Out-Null
+        Start-Sleep -Milliseconds 500
+        Invoke-SeScreenshot -Driver $Driver | Save-SeScreenshot -Path $Path
+        $Driver.ExecuteScript("window.scrollTo(0, 0);") | Out-Null
+        return $Path
+    } catch {
+        return ""
+    }
+}
+
 foreach ($group in $AllRows | Group-Object SiteName) {
 
     $siteName = $group.Name
@@ -125,7 +176,7 @@ foreach ($group in $AllRows | Group-Object SiteName) {
     if (-not $loginRow) {
         $Results.Add([PSCustomObject]@{
             Site=$siteName; Page="CONFIG"; URL=""; Status="Error"
-            Error="No Login row found in config"; Timestamp=(Get-Date); Screenshot=""; DurationSec=0
+            Error="No Login row found in config"; Timestamp=(Get-Date); Screenshot=""; DurationSec=0; CapturedInfo=""; FooterScreenshot=""
         })
         continue
     }
@@ -134,7 +185,7 @@ foreach ($group in $AllRows | Group-Object SiteName) {
         Write-Host "  [$siteName] SKIPPED (disabled in config)" -ForegroundColor DarkGray
         $Results.Add([PSCustomObject]@{
             Site=$siteName; Page="SITE-LEVEL"; URL=$loginRow.Url; Status="Skipped"
-            Error=""; Timestamp=(Get-Date); Screenshot=""; DurationSec=0
+            Error=""; Timestamp=(Get-Date); Screenshot=""; DurationSec=0; CapturedInfo=""; FooterScreenshot=""
         })
         continue
     }
@@ -208,24 +259,43 @@ foreach ($group in $AllRows | Group-Object SiteName) {
             $postLoginEl = Find-SeElementAny -Driver $driver -Selector $loginRow.PostLoginCheckSelector -Timeout 10 -ErrorAction SilentlyContinue
         }
         $loginStatus = if ($postLoginEl) { "Success" } else { "Failure" }
-        $loginShot = Join-Path $ScreenshotFolder "$siteName`_00_Login.png"
+
+        # Optional: capture (not assert) a footer/server tag on the post-login
+        # page, e.g. "S09" - value legitimately varies run to run. Captured
+        # BEFORE the screenshots below so the tag can be folded into their
+        # filenames (e.g. "SiteA_00_Login_S09.png").
+        $loginCapturedInfo = Get-SeCapturedText -Driver $driver -Selector $loginRow.FooterCaptureSelector
+        $loginTag = Get-CaptureFileTag -Text $loginCapturedInfo
+        $loginTagSuffix = if ($loginTag) { "_$loginTag" } else { "" }
+
+        $loginShot = Join-Path $ScreenshotFolder "$siteName`_00_Login$loginTagSuffix.png"
         Invoke-SeFullPageScreenshot -Driver $driver -Path $loginShot
+
+        # Optional: a dedicated footer screenshot as its own test step
+        # (separate from the full-page screenshot above), when the footer
+        # itself - not the whole page - is what's being checked.
+        $loginFooterShotPath = Join-Path $ScreenshotFolder "$siteName`_00_Login_Footer$loginTagSuffix.png"
+        $loginFooterShot = Invoke-SeFooterScreenshot -Driver $driver -Path $loginFooterShotPath -CaptureFlag $loginRow.CaptureFooterScreenshot
         $loginDuration = [math]::Round(((Get-Date) - $loginStepStart).TotalSeconds, 1)
         Write-Host "  [$siteName] LOGIN - $loginStatus ($loginDuration sec)"
 
         $Results.Add([PSCustomObject]@{
             Site=$siteName; Page="LOGIN"; URL=$loginRow.Url; Status=$loginStatus
             Error=$(if ($loginStatus -eq 'Failure') { "Post-login element not found: $($loginRow.PostLoginCheckSelector)" } else { "" })
-            Timestamp=(Get-Date); Screenshot=$loginShot; DurationSec=$loginDuration
+            Timestamp=(Get-Date); Screenshot=$loginShot; DurationSec=$loginDuration; CapturedInfo=$loginCapturedInfo; FooterScreenshot=$loginFooterShot
         })
 
         if ($loginStatus -eq "Failure") { continue }   # skip pages if login didn't work
 
         # ---- PAGES ----
         foreach ($page in $pageRows) {
-            $status = "Success"; $errMsg = ""
+            $status = "Success"; $errMsg = ""; $capturedInfo = ""; $footerShot = ""
             $safeName = ($page.PageName -replace '[^\w\-]', '_')
+            # Default filenames (no captured tag yet - used as a fallback if
+            # something throws before the capture below runs, e.g. the page
+            # itself fails to load).
             $shotPath = Join-Path $ScreenshotFolder "$siteName`_$safeName.png"
+            $footerShotPath = Join-Path $ScreenshotFolder "$siteName`_$safeName`_Footer.png"
             $pageStepStart = Get-Date
 
             try {
@@ -248,7 +318,24 @@ foreach ($group in $AllRows | Group-Object SiteName) {
                     }
                 }
 
+                # Optional: capture (not assert) footer/server-tag text such as
+                # "S09"/"Sxx" - the value legitimately varies run to run and
+                # site to site, so it's logged for reference, never pass/failed.
+                # Captured BEFORE the screenshots below so the tag can be
+                # folded into their filenames (e.g. "SiteA_Dashboard_S09.png").
+                $capturedInfo = Get-SeCapturedText -Driver $driver -Selector $page.FooterCaptureSelector
+                $pageTag = Get-CaptureFileTag -Text $capturedInfo
+                if ($pageTag) {
+                    $shotPath = Join-Path $ScreenshotFolder "$siteName`_$safeName`_$pageTag.png"
+                    $footerShotPath = Join-Path $ScreenshotFolder "$siteName`_$safeName`_Footer_$pageTag.png"
+                }
+
                 Invoke-SeFullPageScreenshot -Driver $driver -Path $shotPath
+
+                # Optional: a dedicated footer screenshot as its own test
+                # step (in addition to the full-page shot above), for cases
+                # where the footer itself is the thing being checked.
+                $footerShot = Invoke-SeFooterScreenshot -Driver $driver -Path $footerShotPath -CaptureFlag $page.CaptureFooterScreenshot
             }
             catch {
                 $status = "Error"
@@ -257,11 +344,12 @@ foreach ($group in $AllRows | Group-Object SiteName) {
             }
 
             $pageDuration = [math]::Round(((Get-Date) - $pageStepStart).TotalSeconds, 1)
-            Write-Host "  [$siteName] $($page.PageName) - $status ($pageDuration sec) - $($page.PageUrl)"
+            $capturedSuffix = if ($capturedInfo) { " - [$capturedInfo]" } else { "" }
+            Write-Host "  [$siteName] $($page.PageName) - $status ($pageDuration sec) - $($page.PageUrl)$capturedSuffix"
 
             $Results.Add([PSCustomObject]@{
                 Site=$siteName; Page=$page.PageName; URL=$page.PageUrl; Status=$status
-                Error=$errMsg; Timestamp=(Get-Date); Screenshot=$shotPath; DurationSec=$pageDuration
+                Error=$errMsg; Timestamp=(Get-Date); Screenshot=$shotPath; DurationSec=$pageDuration; CapturedInfo=$capturedInfo; FooterScreenshot=$footerShot
             })
         }
 
@@ -269,6 +357,14 @@ foreach ($group in $AllRows | Group-Object SiteName) {
         if ($loginRow.LogoutSelector) {
             $logoutStepStart = Get-Date
             try {
+                if ($loginRow.LogoutPageUrl) {
+                    # Navigate to a known page that actually has the logout
+                    # control, rather than assuming whatever page the last
+                    # "Page" row left the browser on has it too (it might not -
+                    # e.g. a standalone widget/settings page with no nav bar).
+                    Enter-SeUrl -Driver $driver -Url $loginRow.LogoutPageUrl
+                    Start-Sleep -Seconds 2
+                }
                 if ($loginRow.LogoutMenuSelector) {
                     $menuBtn = Find-SeElementAny -Driver $driver -Selector $loginRow.LogoutMenuSelector -Timeout 10
                     Invoke-SeClickSafe -Driver $driver -Element $menuBtn
@@ -285,13 +381,13 @@ foreach ($group in $AllRows | Group-Object SiteName) {
 
                 $Results.Add([PSCustomObject]@{
                     Site=$siteName; Page="LOGOUT"; URL=$driver.Url; Status="Success"
-                    Error=""; Timestamp=(Get-Date); Screenshot=$logoutShot; DurationSec=$logoutDuration
+                    Error=""; Timestamp=(Get-Date); Screenshot=$logoutShot; DurationSec=$logoutDuration; CapturedInfo=""; FooterScreenshot=""
                 })
             } catch {
                 $logoutDuration = [math]::Round(((Get-Date) - $logoutStepStart).TotalSeconds, 1)
                 $Results.Add([PSCustomObject]@{
                     Site=$siteName; Page="LOGOUT"; URL=""; Status="Error"
-                    Error=$_.Exception.Message; Timestamp=(Get-Date); Screenshot=""; DurationSec=$logoutDuration
+                    Error=$_.Exception.Message; Timestamp=(Get-Date); Screenshot=""; DurationSec=$logoutDuration; CapturedInfo=""; FooterScreenshot=""
                 })
             }
         }
@@ -300,7 +396,7 @@ foreach ($group in $AllRows | Group-Object SiteName) {
     catch {
         $Results.Add([PSCustomObject]@{
             Site=$siteName; Page="SITE-LEVEL"; URL=$loginRow.Url; Status="Error"
-            Error=$_.Exception.Message; Timestamp=(Get-Date); Screenshot=""; DurationSec=0
+            Error=$_.Exception.Message; Timestamp=(Get-Date); Screenshot=""; DurationSec=0; CapturedInfo=""; FooterScreenshot=""
         })
     }
     finally {
@@ -311,7 +407,9 @@ foreach ($group in $AllRows | Group-Object SiteName) {
 # ================= EXCEL REPORT =================
 $ExcelPath = Join-Path $OutputFolder "TestResults.xlsx"
 $Results |
-    Select-Object Site, Page, URL, Status, Timestamp, DurationSec, Error |
+    Select-Object Site, Page, URL, Status, Timestamp, DurationSec, CapturedInfo,
+        @{Name='FooterScreenshotCaptured'; Expression={ if ($_.FooterScreenshot) { 'Yes' } else { '' } }},
+        Error |
     Export-Excel -Path $ExcelPath -WorksheetName "Results" -TableName "Results" `
                   -AutoSize -FreezeTopRow -BoldTopRow `
                   -ConditionalText @(
@@ -349,6 +447,11 @@ foreach ($siteGroup in $Results | Group-Object Site) {
         $sel.TypeText("URL: $($r.URL)  |  Duration: $($r.DurationSec) sec")
         $sel.TypeParagraph()
 
+        if ($r.CapturedInfo) {
+            $sel.TypeText("Captured info (e.g. server/footer tag): $($r.CapturedInfo)")
+            $sel.TypeParagraph()
+        }
+
         if ($r.Error) {
             $sel.Font.Color = 255            # red-ish
             $sel.TypeText("Issue: $($r.Error)")
@@ -358,6 +461,14 @@ foreach ($siteGroup in $Results | Group-Object Site) {
 
         if ($r.Screenshot -and (Test-Path $r.Screenshot)) {
             $sel.InlineShapes.AddPicture($r.Screenshot) | Out-Null
+            $sel.TypeParagraph()
+        }
+
+        if ($r.FooterScreenshot -and (Test-Path $r.FooterScreenshot)) {
+            $sel.Style = "Normal"
+            $sel.TypeText("Footer screenshot:")
+            $sel.TypeParagraph()
+            $sel.InlineShapes.AddPicture($r.FooterScreenshot) | Out-Null
             $sel.TypeParagraph()
         }
         $sel.TypeParagraph()
