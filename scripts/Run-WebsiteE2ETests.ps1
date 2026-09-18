@@ -26,6 +26,7 @@ Write-Host "Started: $($ScriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -Foreg
 
 Import-Module Selenium -ErrorAction Stop
 Import-Module ImportExcel -ErrorAction Stop
+Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
 
 New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
 $ScreenshotFolder = Join-Path $OutputFolder "Screenshots"
@@ -46,13 +47,32 @@ function Get-SiteCredential {
     return New-Object System.Management.Automation.PSCredential($username, $securePassword)
 }
 
-# Finds an element using either a CSS selector or an XPath expression.
-# A selector value starting with "//" is treated as XPath (needed for elements
-# only identifiable by visible text, e.g. a logout link with no id/class);
-# everything else is treated as a normal CSS selector.
+# Finds an element using a CSS selector, an XPath expression, or a shadow-DOM
+# piercing chain. A selector starting with "//" is XPath. A selector containing
+# ">>>" is a shadow-DOM chain - e.g. "custom-login-widget >>> #username" means
+# "find custom-login-widget by CSS, then find #username inside its shadow root"
+# (chain as many ">>>" as there are nested shadow roots). Everything else is a
+# normal CSS selector. Note: a CLOSED shadow root cannot be pierced by any
+# method, including this one - that's a browser-level restriction, not a
+# limitation specific to this script.
 function Find-SeElementAny {
     param($Driver, [string]$Selector, [double]$Timeout = 10)
-    if ($Selector -like '//*') {
+    if ($Selector -like '*>>>*') {
+        $parts = $Selector -split '\s*>>>\s*'
+        $js = 'let el = document.querySelector(arguments[0]); if (!el) return null;'
+        for ($i = 1; $i -lt $parts.Count; $i++) {
+            $js += " if (!el.shadowRoot) return null; el = el.shadowRoot.querySelector(arguments[$i]); if (!el) return null;"
+        }
+        $js += ' return el;'
+        $deadline = (Get-Date).AddSeconds($Timeout)
+        do {
+            $found = $Driver.ExecuteScript($js, $parts)
+            if ($found) { return $found }
+            Start-Sleep -Milliseconds 300
+        } while ((Get-Date) -lt $deadline)
+        throw "Shadow DOM element not found (or shadow root is closed/inaccessible) for: $Selector"
+    }
+    elseif ($Selector -like '//*') {
         return Find-SeElement -Driver $Driver -XPath $Selector -Timeout $Timeout
     } else {
         return Find-SeElement -Driver $Driver -CssSelector $Selector -Timeout $Timeout
@@ -71,6 +91,31 @@ function Invoke-SeClickSafe {
     }
 }
 
+# Takes a screenshot of the ENTIRE page, not just the visible viewport.
+# Temporarily resizes the browser window to the page's full scroll height
+# (works even headless, since Chrome allows arbitrary window sizes there),
+# takes the shot, then restores the original window size. Falls back to a
+# normal viewport screenshot if anything about the resize fails.
+function Invoke-SeFullPageScreenshot {
+    param($Driver, [string]$Path)
+    try {
+        $originalSize = $Driver.Manage().Window.Size
+        $totalHeight = [int]$Driver.ExecuteScript("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
+        $totalWidth  = [int]$Driver.ExecuteScript("return Math.max(document.body.scrollWidth, document.documentElement.scrollWidth, window.innerWidth);")
+        $newWidth  = [math]::Max($originalSize.Width, $totalWidth)
+        $newHeight = [math]::Max($originalSize.Height, $totalHeight)
+        $Driver.Manage().Window.Size = New-Object System.Drawing.Size($newWidth, $newHeight)
+        Start-Sleep -Milliseconds 400   # let layout settle after resize
+        Invoke-SeScreenshot -Driver $Driver | Save-SeScreenshot -Path $Path
+        $Driver.Manage().Window.Size = $originalSize
+    } catch {
+        # Resize failed for some reason (e.g. a fixed/sticky-position layout
+        # quirk) - fall back to a normal viewport screenshot rather than losing
+        # the screenshot entirely.
+        try { Invoke-SeScreenshot -Driver $Driver | Save-SeScreenshot -Path $Path } catch { }
+    }
+}
+
 foreach ($group in $AllRows | Group-Object SiteName) {
 
     $siteName = $group.Name
@@ -81,6 +126,15 @@ foreach ($group in $AllRows | Group-Object SiteName) {
         $Results.Add([PSCustomObject]@{
             Site=$siteName; Page="CONFIG"; URL=""; Status="Error"
             Error="No Login row found in config"; Timestamp=(Get-Date); Screenshot=""; DurationSec=0
+        })
+        continue
+    }
+
+    if ($loginRow.Enabled -eq 'No') {
+        Write-Host "  [$siteName] SKIPPED (disabled in config)" -ForegroundColor DarkGray
+        $Results.Add([PSCustomObject]@{
+            Site=$siteName; Page="SITE-LEVEL"; URL=$loginRow.Url; Status="Skipped"
+            Error=""; Timestamp=(Get-Date); Screenshot=""; DurationSec=0
         })
         continue
     }
@@ -110,10 +164,24 @@ foreach ($group in $AllRows | Group-Object SiteName) {
         Enter-SeUrl -Driver $driver -Url $loginRow.Url
         Start-Sleep -Seconds 2
         $preLoginShot = Join-Path $ScreenshotFolder "$siteName`_00_PreLogin.png"
-        Invoke-SeScreenshot -Driver $driver | Save-SeScreenshot -Path $preLoginShot
+        Invoke-SeFullPageScreenshot -Driver $driver -Path $preLoginShot
+
+        if ($loginRow.IframeSelector) {
+            $frameEl = Find-SeElementAny -Driver $driver -Selector $loginRow.IframeSelector -Timeout 15
+            Switch-SeFrame -Frame $frameEl
+        }
 
         $userField = Find-SeElementAny -Driver $driver -Selector $loginRow.UserFieldSelector -Timeout 15
         Send-SeKeys -Element $userField -Keys $cred.UserName
+
+        if ($loginRow.ContinueButtonSelector) {
+            # Two-step login: username -> Continue -> separate password screen
+            $continueBtn = Find-SeElementAny -Driver $driver -Selector $loginRow.ContinueButtonSelector -Timeout 15
+            Invoke-SeClickSafe -Driver $driver -Element $continueBtn
+            Start-Sleep -Seconds 2
+            $afterUserShot = Join-Path $ScreenshotFolder "$siteName`_00b_AfterUsername.png"
+            Invoke-SeFullPageScreenshot -Driver $driver -Path $afterUserShot
+        }
 
         $passField = Find-SeElementAny -Driver $driver -Selector $loginRow.PassFieldSelector -Timeout 15
         Send-SeKeys -Element $passField -Keys $cred.GetNetworkCredential().Password
@@ -122,13 +190,26 @@ foreach ($group in $AllRows | Group-Object SiteName) {
         Invoke-SeClickSafe -Driver $driver -Element $loginBtn
         Start-Sleep -Seconds 3
 
+        if ($loginRow.IframeSelector) {
+            Switch-SeFrame -Root   # back to the main document - login normally navigates the outer page away from the iframe
+        }
+
+        if ($loginRow.RequiresMFA -eq 'Yes') {
+            if ($Headless) {
+                Write-Host "  [$siteName] WARNING: RequiresMFA is Yes but running headless - there's no visible browser to complete MFA in. Re-run with -Headless:`$false for this site." -ForegroundColor Yellow
+            } else {
+                Write-Host "`n  [$siteName] MFA required - complete it now in the browser window." -ForegroundColor Yellow
+                Read-Host "  Press Enter once you've completed MFA and are logged in"
+            }
+        }
+
         $postLoginEl = $null
         if ($loginRow.PostLoginCheckSelector) {
             $postLoginEl = Find-SeElementAny -Driver $driver -Selector $loginRow.PostLoginCheckSelector -Timeout 10 -ErrorAction SilentlyContinue
         }
         $loginStatus = if ($postLoginEl) { "Success" } else { "Failure" }
         $loginShot = Join-Path $ScreenshotFolder "$siteName`_00_Login.png"
-        Invoke-SeScreenshot -Driver $driver | Save-SeScreenshot -Path $loginShot
+        Invoke-SeFullPageScreenshot -Driver $driver -Path $loginShot
         $loginDuration = [math]::Round(((Get-Date) - $loginStepStart).TotalSeconds, 1)
         Write-Host "  [$siteName] LOGIN - $loginStatus ($loginDuration sec)"
 
@@ -167,12 +248,12 @@ foreach ($group in $AllRows | Group-Object SiteName) {
                     }
                 }
 
-                Invoke-SeScreenshot -Driver $driver | Save-SeScreenshot -Path $shotPath
+                Invoke-SeFullPageScreenshot -Driver $driver -Path $shotPath
             }
             catch {
                 $status = "Error"
                 $errMsg = $_.Exception.Message
-                try { Invoke-SeScreenshot -Driver $driver | Save-SeScreenshot -Path $shotPath } catch { }
+                Invoke-SeFullPageScreenshot -Driver $driver -Path $shotPath
             }
 
             $pageDuration = [math]::Round(((Get-Date) - $pageStepStart).TotalSeconds, 1)
@@ -198,7 +279,7 @@ foreach ($group in $AllRows | Group-Object SiteName) {
                 Start-Sleep -Seconds 2
 
                 $logoutShot = Join-Path $ScreenshotFolder "$siteName`_99_Logout.png"
-                Invoke-SeScreenshot -Driver $driver | Save-SeScreenshot -Path $logoutShot
+                Invoke-SeFullPageScreenshot -Driver $driver -Path $logoutShot
                 $logoutDuration = [math]::Round(((Get-Date) - $logoutStepStart).TotalSeconds, 1)
                 Write-Host "  [$siteName] LOGOUT - Success ($logoutDuration sec)"
 
@@ -237,6 +318,7 @@ $Results |
                       New-ConditionalText -Text "Success" -BackgroundColor LightGreen
                       New-ConditionalText -Text "Failure" -BackgroundColor LightYellow
                       New-ConditionalText -Text "Error"   -BackgroundColor LightPink
+                      New-ConditionalText -Text "Skipped" -BackgroundColor LightGray
                   )
 
 # ================= WORD REPORT =================
@@ -291,6 +373,11 @@ $word.Quit()
 $ScriptEndTime = Get-Date
 $TotalElapsed = $ScriptEndTime - $ScriptStartTime
 
+$successCount = ($Results | Where-Object Status -eq 'Success').Count
+$failureCount = ($Results | Where-Object Status -eq 'Failure').Count
+$errorCount   = ($Results | Where-Object Status -eq 'Error').Count
+$skippedCount = ($Results | Where-Object Status -eq 'Skipped').Count
+
 Write-Host "Done."
 Write-Host "Started      : $($ScriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Host "Finished     : $($ScriptEndTime.ToString('yyyy-MM-dd HH:mm:ss'))"
@@ -298,3 +385,17 @@ Write-Host "Total time   : $($TotalElapsed.ToString('hh\:mm\:ss'))"
 Write-Host "Excel report : $ExcelPath"
 Write-Host "Word report  : $docxPath"
 Write-Host "Screenshots  : $ScreenshotFolder"
+
+$summaryColor = if ($failureCount -gt 0 -or $errorCount -gt 0) { 'Red' } else { 'Green' }
+$summaryLine = "Summary: $successCount Success, $failureCount Failure, $errorCount Error"
+if ($skippedCount -gt 0) { $summaryLine += ", $skippedCount Skipped" }
+Write-Host $summaryLine -ForegroundColor $summaryColor
+
+# Non-zero exit code whenever anything failed or errored, so a Task Scheduler
+# job or CI pipeline can detect a bad run automatically without opening the
+# Excel report.
+if ($failureCount -gt 0 -or $errorCount -gt 0) {
+    exit 1
+} else {
+    exit 0
+}

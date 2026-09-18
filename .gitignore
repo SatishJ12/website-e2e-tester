@@ -1,7 +1,3 @@
-# Encrypted per-site credentials — DPAPI-encrypted but still never commit these
-/Creds/*
-!/Creds/.gitkeep
-
 # Generated test run output (screenshots, Word/Excel reports) — regenerated each run
 /TestRun_*/
 
