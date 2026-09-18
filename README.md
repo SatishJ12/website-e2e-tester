@@ -7,12 +7,11 @@ website-e2e-tester/
 │   └── Run-WebsiteE2ETests.ps1
 ├── config/
 │   ├── Site-Config.csv         ← fill in with your real 6-7 sites
-│   └── Site-Config-Demo.csv    ← public SauceDemo sandbox, for trial runs
-├── Creds/                      ← auto-created, gitignored — never commit this
+│   └── Site-Config-Demo.csv    ← public sandbox sites, for trial runs
 ├── TestRun_*/                  ← auto-created per run, gitignored
 └── .gitignore
 ```
-Everything here runs locally against your own Windows machine — nothing runs in a cloud sandbox, so test it on your PC before pushing to GitHub.
+Everything here runs locally against your own Windows machine — nothing runs in a cloud sandbox, so test it on your PC before pushing to GitHub. Credentials are never written to disk — the script prompts for username/password fresh every run, for every site (see "Credentials" below).
 
 ## One-time setup
 ```powershell
@@ -37,8 +36,8 @@ Edit `Site-Config.csv`:
 
 To find CSS selectors: open the page in Edge/Chrome, right-click the element → Inspect, right-click the highlighted HTML → Copy → Copy selector.
 
-## First run (credentials)
-The first time you run against a given `SiteName`, it will prompt for username and password right in the PowerShell console (password input is masked) and save an encrypted copy under `.\Creds\<SiteName>.xml`. That file is only decryptable by the same Windows account on the same machine (DPAPI) — nothing is stored in plain text. Delete it any time to be re-prompted.
+## Credentials
+Every run, for every site, the script prompts for username and password right in the PowerShell console (password input is masked). Nothing is saved to disk anywhere — no file, no cache — so you'll be asked again next time, even for the same site. This is deliberate: no credential file to accidentally commit, leave behind, or have picked up by anything else on the machine.
 
 ## Run it
 From the repo root:
@@ -49,7 +48,7 @@ Once the demo run looks right, switch to your real config:
 ```powershell
 .\scripts\Run-WebsiteE2ETests.ps1 -ConfigPath .\config\Site-Config.csv
 ```
-Add `-Headless:$false` any time you want to watch the browser while debugging selectors. `Creds\` and `TestRun_*\` folders are created next to the repo root automatically and are already gitignored.
+Add `-Headless:$false` any time you want to watch the browser while debugging selectors. `TestRun_*\` folders are created next to the repo root automatically and are already gitignored.
 
 ## Output
 Each run creates a timestamped folder containing:
@@ -86,8 +85,7 @@ Wrap the `.ps1` call in a Windows Task Scheduler job (Action: `powershell.exe -F
 | Selenium `Start-SeEdge` fails or can't find a driver | Edge itself isn't installed, or the installed Edge version and the auto-downloaded driver are mismatched (rare, but can happen right after an Edge auto-update). | Confirm Edge opens normally; update the module: `Update-Module Selenium`. Otherwise switch to Chrome (see row above) — it's the more reliably supported browser in this module. |
 | A page row always comes back `Error: element not found` even though the page loads fine | The CSS selector for `HeaderSelector`/`SubHeaderSelector` doesn't match the real page (site markup changed, or selector was copied wrong). | Re-run with `-Headless:$false` to watch it, and re-copy the selector from the browser's Inspect panel (right-click element → Inspect → right-click the HTML → Copy → Copy selector). |
 | Login always shows `Failure` even with correct credentials | `PostLoginCheckSelector` doesn't match anything on the real post-login page, or the page takes longer than the fixed 2-3 second wait to load. | Verify the selector exists on the real logged-in page; if the site is just slow, increase the `Start-Sleep -Seconds 3` after the login click. |
-| Wrong saved password and script won't ask again | Credentials are cached in `Creds\<SiteName>.xml` from a previous run. | Delete that file to force the credential prompt again: `Remove-Item .\Creds\<SiteName>.xml` |
-| First-run credential prompt appears in Alt-Tab but the window never comes to the foreground / won't accept focus | Windows' `Get-Credential` popup can fail to come forward when another process (the browser) is active in the background — a known focus-stealing-prevention quirk. | Switch to an in-console prompt instead: in `Get-SiteCredential`, replace the `Get-Credential` call with `Read-Host "Username"` and `Read-Host "Password" -AsSecureString`, then build the credential with `New-Object System.Management.Automation.PSCredential($username, $securePassword)`. This appears in the console you're already using, so there's no separate window to lose focus. |
+| First-run credential prompt appears in Alt-Tab but the window never comes to the foreground / won't accept focus | This was a symptom of the older `Get-Credential` popup, which can fail to come forward when another process (the browser) is active in the background. | Already fixed — the script prompts in-console via `Read-Host` now (no separate popup window to lose focus). If you're seeing this, you may be on an older copy of the script. |
 | `Exception calling ".ctor" with "2" argument(s): "Cannot process argument because the value of argument "userName" is not valid...` right after entering credentials | Chrome/ChromeDriver write background log lines (GCM/TensorFlow messages) directly to the console; if one of those lines interleaves with an in-progress `Read-Host` prompt, it can corrupt what PowerShell captures as your typed username, producing an empty/invalid value. | Move the credential prompt (`Get-SiteCredential` call) to *before* `Start-SeChrome` runs, so nothing is writing to the console yet while you're typing. Nothing needs cleaning up — the corrupted attempt fails before saving anything, so just re-run. |
 | Two Chrome windows open per site, or one Chrome window is left running after the script finishes a site | A `Start-SeChrome` call was pasted in twice for the same site (e.g. while moving the credential prompt earlier) instead of replacing the original, so the browser launches twice and the first instance is never assigned to `$driver` or closed. | Make sure there is exactly one `$driver = if ($Headless) { Start-SeChrome ... } else { Start-SeChrome ... }` block per site, with `Get-SiteCredential` called once, above it. Remove any duplicate block. |
-| Chrome opens but is stuck on a blank/unfilled login page for a long time on the very first run | Not actually stuck — `Find-SeElement` waits up to 15 seconds per element, and the very first run for a new site also pauses for the console credential prompt. | Check whether `chrome.exe`/`chromedriver.exe` are still using CPU in Task Manager (still working) vs fully idle (actually frozen), and check the console for a waiting `Username:`/`Password:` prompt. Give it up to 30–45 seconds before assuming it's hung. |
+| Chrome opens but is stuck on a blank/unfilled login page for a long time | Not actually stuck — `Find-SeElement` waits up to 15 seconds per element, and every run pauses for the console credential prompt before the browser even opens. | Check whether `chrome.exe`/`chromedriver.exe` are still using CPU in Task Manager (still working) vs fully idle (actually frozen), and check the console for a waiting `Username:`/`Password:` prompt. Give it up to 30–45 seconds before assuming it's hung. |

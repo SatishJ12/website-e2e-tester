@@ -11,13 +11,12 @@
 
 .USAGE
     .\Run-WebsiteE2ETests.ps1 -ConfigPath .\Site-Config.csv
-    First run per site will prompt for credentials once, then reuse them
-    (encrypted, tied to this Windows user + machine) on every future run.
+    Prompts for username/password every run, for every site — nothing is
+    saved to disk between runs.
 #>
 
 param(
     [string]$ConfigPath   = "$PSScriptRoot\..\config\Site-Config.csv",
-    [string]$CredFolder   = "$PSScriptRoot\..\Creds",
     [string]$OutputFolder = "$PSScriptRoot\..\TestRun_$(Get-Date -Format yyyyMMdd_HHmmss)",
     [switch]$Headless = $true
 )
@@ -29,7 +28,6 @@ Import-Module Selenium -ErrorAction Stop
 Import-Module ImportExcel -ErrorAction Stop
 
 New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
-New-Item -ItemType Directory -Path $CredFolder   -Force | Out-Null
 $ScreenshotFolder = Join-Path $OutputFolder "Screenshots"
 New-Item -ItemType Directory -Path $ScreenshotFolder -Force | Out-Null
 
@@ -42,16 +40,10 @@ $Results = New-Object System.Collections.Generic.List[object]
 
 function Get-SiteCredential {
     param([string]$SiteName)
-    $path = Join-Path $CredFolder "$SiteName.xml"
-    if (Test-Path $path) {
-        return Import-Clixml $path
-    }
     Write-Host "`nEnter login credentials for $SiteName" -ForegroundColor Cyan
     $username = Read-Host "Username"
     $securePassword = Read-Host "Password" -AsSecureString
-    $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
-    $cred | Export-Clixml $path
-    return $cred
+    return New-Object System.Management.Automation.PSCredential($username, $securePassword)
 }
 
 # Finds an element using either a CSS selector or an XPath expression.
