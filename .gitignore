@@ -1,5 +1,6 @@
-# Generated test run output (screenshots, Word/Excel reports) — regenerated each run
+# Generated test run output (screenshots, Word/Excel reports) - regenerated each run
 /TestRun_*/
+/QuickCheck_*/
 
 # OS junk
 .DS_Store
