@@ -1,0 +1,5 @@
+SiteName,Enabled,RowType,Url,UserFieldSelector,ContinueButtonSelector,PassFieldSelector,LoginButtonSelector,PostLoginCheckSelector,RequiresMFA,IframeSelector,LogoutMenuSelector,LogoutSelector,LogoutPageUrl,PageName,PageUrl,ExpectedHeader,HeaderSelector,ExpectedSubHeader,SubHeaderSelector,FooterCaptureSelector,CaptureFooterScreenshot
+ParaBank,Yes,Login,https://parabank.parasoft.com/parabank/index.htm,input[name='username'],,input[name='password'],input[value='Log In'],h1.title,,,,a[href='logout.htm'],,,,,,,,#footerPanel,Yes
+ParaBank,,Page,,,,,,,,,,,,AccountsOverview,https://parabank.parasoft.com/parabank/overview.htm,Accounts Overview,h1.title,,,#footerPanel,Yes
+OrangeHRM,Yes,Login,https://opensource-demo.orangehrmlive.com/web/index.php/auth/login,input[name='username'],,input[name='password'],button[type='submit'],//h6[text()='Dashboard'],,,.oxd-userdropdown-tab,//a[text()='Logout'],,,,,,,,,
+OrangeHRM,,Page,,,,,,,,,,,,Dashboard,https://opensource-demo.orangehrmlive.com/web/index.php/dashboard/index,Dashboard,//h6[text()='Dashboard'],,,,

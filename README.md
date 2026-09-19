@@ -5,11 +5,14 @@
 website-e2e-tester/
 ├── scripts/
 │   ├── Run-WebsiteE2ETests.ps1
+│   ├── Run-QuickSiteCheck.ps1   ← lightweight variant: Excel only, only the pages you list per site
 │   └── Update-ChromeDriver.ps1  ← run this whenever Chrome auto-updates and the driver falls out of sync
 ├── config/
-│   ├── Site-Config.csv         ← fill in with your real 6-7 sites
-│   └── Site-Config-Demo.csv    ← public sandbox sites, for trial runs
-├── TestRun_*/                  ← auto-created per run, gitignored
+│   ├── Site-Config.csv         ← fill in with your real 6-7 sites, full page lists
+│   ├── Site-Config-Demo.csv    ← public sandbox sites, for trial runs
+│   └── QuickCheck-Config.csv   ← same column format, but only the pages you want in a quick check
+├── TestRun_*/                  ← auto-created per run of Run-WebsiteE2ETests.ps1, gitignored
+├── QuickCheck_*/                ← auto-created per run of Run-QuickSiteCheck.ps1, gitignored
 └── .gitignore
 ```
 Everything here runs locally against your own Windows machine — nothing runs in a cloud sandbox, so test it on your PC before pushing to GitHub. Credentials are never written to disk — the script prompts for username/password fresh every run, for every site (see "Credentials" below).
@@ -215,6 +218,23 @@ Wrap the `.ps1` call in a Windows Task Scheduler job so it can run on a timer in
 - In Task Scheduler, select the task and look at **Last Run Result** in the bottom pane. `(0x0)` means the script exited cleanly with no Failure/Error rows (see Summary line and exit code above); any other value means something in that run needs attention — open the corresponding `TestRun_*` folder to see what.
 
 **For a hands-off nightly run of only the sites that don't need MFA or manual attention**, set `Enabled` to `No` on any MFA-required sites in a dedicated scheduled-run copy of the config, and schedule that copy instead of your full `Site-Config.csv` — that way the automatic run doesn't stall waiting for a 2FA code nobody's there to enter.
+
+## Quick Site Check (lightweight run)
+`scripts\Run-QuickSiteCheck.ps1` is a trimmed-down sibling of the main script for when you only need a fast spot-check — e.g. during an incident, confirm Login + Account Overview still work and capture the server tag, without running (or waiting for) every page across every site.
+
+**What's different from `Run-WebsiteE2ETests.ps1`:**
+- Uses the **same engine** underneath — identical selector handling (CSS/XPath/shadow-DOM), login patterns (two-step, MFA, iframe), full-page and footer screenshots, and fresh-credential-every-run behavior. Nothing about *how* it drives the browser is different.
+- Reads a **separate, smaller config file** (`config\QuickCheck-Config.csv` by default) in the exact same 22-column format as `Site-Config.csv` — you just list fewer `Page` rows per site (e.g. only `Login` + `AccountsOverview`, skip the rest). Since it's a different file, your full `Site-Config.csv` is untouched.
+- Produces **Excel only** — no `.docx`, so Word isn't even required to run this script. The Excel sheet (`QuickCheckResults.xlsx`) has just: `Site`, `Page` (holds `LOGIN`/`LOGOUT`/`SITE-LEVEL` for those special rows, or the page name), `URL`, `Status`, `TimeTakenSec`, `Error` — same color-coded Success/Failure/Error/Skipped as before.
+- Footer/server-tag capture (`FooterCaptureSelector`, `CaptureFooterScreenshot`) works exactly as in the main script, including multiple different tags across different pages of the same site (e.g. Login shows `S09`, Account Overview shows `S14`) — each gets its own tagged screenshot file in `Screenshots\`. The captured text itself isn't a separate Excel column here (keeps the sheet to the essentials above); read it off the screenshot filename or reuse the full script's Excel output (which does include a `CapturedInfo` column) if you need it in a spreadsheet cell too.
+
+**Run it:**
+```powershell
+.\scripts\Run-QuickSiteCheck.ps1 -ConfigPath .\config\QuickCheck-Config.csv -Headless:$false
+```
+Same flags as the main script (`-ConfigPath`, `-OutputFolder`, `-Headless`), same exit-code behavior (`0` clean, `1` if anything Failed/Errored) for Task Scheduler/CI use.
+
+**Building your `QuickCheck-Config.csv`**: copy just the `Login` row and the specific `Page` row(s) you care about from `Site-Config.csv` for each site — the column layout is identical, so no translation needed. Leave `LogoutSelector` blank on a site if you don't want it to bother logging out for a quick check (or keep it if you'd rather always close the session cleanly).
 
 ## Troubleshooting
 
