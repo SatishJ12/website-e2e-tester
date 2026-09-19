@@ -26,7 +26,16 @@
 param(
     [string]$ConfigPath   = "$PSScriptRoot\..\config\QuickCheck-Config.csv",
     [string]$OutputFolder = "$PSScriptRoot\..\QuickCheck_$(Get-Date -Format yyyyMMdd_HHmmss)",
-    [switch]$Headless = $true
+    [switch]$Headless = $true,
+
+    # ---- ROI / business-value estimate (see "ROI Summary" sheet in the Excel
+    # report) - all four are just assumptions you supply; the script doesn't
+    # know your actual manual process or pay rate, so adjust these to match
+    # reality rather than trusting the defaults for anything you'd present.
+    [double]$ManualMinutesPerCheck = 3,     # how long a person takes to manually open a page, verify it, and note the result
+    [int]$RunsPerDay               = 4,     # how many times a day this quick check (or a manual equivalent) actually gets run
+    [double]$HourlyRate            = 22,    # fully-loaded hourly cost of whoever would do this manually; set to 0 to skip cost figures, time-only
+    [string]$CurrencySymbol        = "$"    # only used if HourlyRate > 0
 )
 
 $ScriptStartTime = Get-Date
@@ -433,12 +442,58 @@ $failureCount = ($Results | Where-Object Status -eq 'Failure').Count
 $errorCount   = ($Results | Where-Object Status -eq 'Error').Count
 $skippedCount = ($Results | Where-Object Status -eq 'Skipped').Count
 
+# ================= ROI SUMMARY (business-value estimate) =================
+# Rough, assumption-based estimate of manual effort this run replaced -
+# never a measured fact, just $ManualMinutesPerCheck x checks vs. actual
+# automated time. Written as its own worksheet so it doesn't clutter the
+# Results sheet, and projected out to monthly/annual using $RunsPerDay.
+$checksCount          = ($Results | Where-Object { $_.Status -ne 'Skipped' }).Count
+$manualEquivMinutes   = [math]::Round($checksCount * $ManualMinutesPerCheck, 1)
+$automatedMinutes     = [math]::Round($TotalElapsed.TotalMinutes, 1)
+$timeSavedMinutes     = [math]::Round($manualEquivMinutes - $automatedMinutes, 1)
+$percentSaved         = if ($manualEquivMinutes -gt 0) { [math]::Round(($timeSavedMinutes / $manualEquivMinutes) * 100, 0) } else { 0 }
+$dailySavedMinutes    = [math]::Round($timeSavedMinutes * $RunsPerDay, 1)
+$dailySavedHours      = [math]::Round($dailySavedMinutes / 60, 1)
+$monthlySavedHours    = [math]::Round($dailySavedMinutes * 22 / 60, 1)    # ~22 working days/month
+$annualSavedHours     = [math]::Round($dailySavedMinutes * 260 / 60, 1)   # ~260 working days/year
+
+$roiRows = @(
+    [PSCustomObject]@{ Metric = "Checks performed this run (excl. Skipped)";               Value = $checksCount }
+    [PSCustomObject]@{ Metric = "Assumed manual time per check (min)";                     Value = $ManualMinutesPerCheck }
+    [PSCustomObject]@{ Metric = "Manual-equivalent time for this run (min)";                Value = $manualEquivMinutes }
+    [PSCustomObject]@{ Metric = "Actual automated time for this run (min)";                 Value = $automatedMinutes }
+    [PSCustomObject]@{ Metric = "Time saved this run (min)";                                Value = $timeSavedMinutes }
+    [PSCustomObject]@{ Metric = "Time saved this run (%)";                                  Value = "$percentSaved%" }
+    [PSCustomObject]@{ Metric = "Assumed runs per day";                                     Value = $RunsPerDay }
+    [PSCustomObject]@{ Metric = "Time saved per day (hrs)";                                 Value = $dailySavedHours }
+    [PSCustomObject]@{ Metric = "Time saved per month - approx. 22 working days (hrs)";     Value = $monthlySavedHours }
+    [PSCustomObject]@{ Metric = "Time saved per year - approx. 260 working days (hrs)";     Value = $annualSavedHours }
+)
+
+if ($HourlyRate -gt 0) {
+    $costSavedRun   = [math]::Round(($timeSavedMinutes / 60) * $HourlyRate, 2)
+    $costSavedMonth = [math]::Round($monthlySavedHours * $HourlyRate, 2)
+    $costSavedYear  = [math]::Round($annualSavedHours * $HourlyRate, 2)
+    $roiRows += [PSCustomObject]@{ Metric = "Assumed hourly rate ($CurrencySymbol)";        Value = $HourlyRate }
+    $roiRows += [PSCustomObject]@{ Metric = "Cost saved this run ($CurrencySymbol)";        Value = $costSavedRun }
+    $roiRows += [PSCustomObject]@{ Metric = "Cost saved per month ($CurrencySymbol)";       Value = $costSavedMonth }
+    $roiRows += [PSCustomObject]@{ Metric = "Cost saved per year ($CurrencySymbol)";        Value = $costSavedYear }
+}
+
+$roiRows | Export-Excel -Path $ExcelPath -WorksheetName "ROI Summary" -AutoSize -BoldTopRow -FreezeTopRow
+
 Write-Host "Done."
 Write-Host "Started      : $($ScriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Host "Finished     : $($ScriptEndTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Host "Total time   : $($TotalElapsed.ToString('hh\:mm\:ss'))"
 Write-Host "Excel report : $ExcelPath"
 Write-Host "Screenshots  : $ScreenshotFolder"
+
+if ($timeSavedMinutes -ge 0) {
+    Write-Host "ROI (est.)   : ~$timeSavedMinutes min saved this run ($percentSaved%) vs. manual - projected ~$monthlySavedHours hrs/month at $RunsPerDay runs/day (see 'ROI Summary' tab in Excel)" -ForegroundColor Cyan
+} else {
+    Write-Host "ROI (est.)   : automated run took longer than the assumed manual estimate this time - check -ManualMinutesPerCheck / -RunsPerDay against reality (see 'ROI Summary' tab)" -ForegroundColor Yellow
+}
 
 $summaryColor = if ($failureCount -gt 0 -or $errorCount -gt 0) { 'Red' } else { 'Green' }
 $summaryLine = "Summary: $successCount Success, $failureCount Failure, $errorCount Error"

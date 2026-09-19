@@ -189,6 +189,29 @@ Each run creates a timestamped folder containing:
 ## Summary line and exit code
 At the end of every run, the console prints a one-line summary (`Summary: 14 Success, 1 Failure, 0 Error`) in green if everything passed or red if anything didn't — no need to open Excel just to know whether the run was clean. The script also exits with code `1` if there was any Failure or Error, and `0` if everything passed (Skipped sites don't count against this). That makes it usable in Windows Task Scheduler (check the task's last run result) or any CI pipeline that wants to alert automatically on a bad run.
 
+## ROI / business-value estimate
+Both `Run-WebsiteE2ETests.ps1` and `Run-QuickSiteCheck.ps1` write a second Excel worksheet, **"ROI Summary"**, alongside the results — a rough estimate of the manual effort each run replaced, projected out to a monthly/annual figure. It's meant for showing "here's what this is worth" to a manager or in a status update, not as a precise cost model.
+
+**How it's calculated** — every one of these is an assumption you supply, not something the script measures or knows on its own:
+| Parameter | Default | Meaning |
+|---|---|---|
+| `-ManualMinutesPerCheck` | `3` | How long a person takes to manually open one page/login/logout step, verify it, and note the result |
+| `-RunsPerDay` | `4` | How many times a day this suite (or its manual equivalent) actually runs — bump this up for incident days |
+| `-HourlyRate` | `22` | Fully-loaded hourly cost of whoever would do this manually. Set to `0` to skip cost figures entirely and show time only |
+| `-CurrencySymbol` | `$` | Only used if `-HourlyRate` is set above `0` — change to `₹`, `€`, etc. as needed |
+
+The math: `checks performed × ManualMinutesPerCheck` = manual-equivalent time, compared against the run's actual elapsed time, then multiplied by `RunsPerDay` and projected across ~22 working days/month and ~260 working days/year. If `-HourlyRate` is set, the same time savings are converted to cost savings too.
+
+Cost figures are **on by default** now (`-HourlyRate 22`, in `$`) — every run's Excel "ROI Summary" tab and console line include a dollar estimate unless you override it.
+
+**Example (overriding the defaults):**
+```powershell
+.\scripts\Run-WebsiteE2ETests.ps1 -ConfigPath .\config\Site-Config.csv -ManualMinutesPerCheck 4 -RunsPerDay 6 -HourlyRate 800 -CurrencySymbol "₹"
+```
+This says: each manual check would take ~4 minutes, this suite effectively runs ~6 times a day (accounting for incident-driven re-runs), and the fully-loaded hourly cost of doing it by hand is ₹800/hour. The console prints a one-line estimate (e.g. `ROI (est.): ~42 min saved this run (88%) vs. manual - projected ~15.4 hrs/month at 6 runs/day`), and the full breakdown — including cost — lands in the "ROI Summary" tab of the Excel report.
+
+**Treat the numbers as a starting estimate, not a fact**: the defaults are generic guesses. If you actually know how long your manual process takes and how often it really runs, pass your own values — the estimate is only as good as the assumptions behind it, and presenting it as measured savings without saying so would be misleading.
+
 ## Scheduling
 Wrap the `.ps1` call in a Windows Task Scheduler job so it can run on a timer instead of manually.
 
@@ -227,6 +250,7 @@ Wrap the `.ps1` call in a Windows Task Scheduler job so it can run on a timer in
 - Reads a **separate, smaller config file** (`config\QuickCheck-Config.csv` by default) in the exact same 22-column format as `Site-Config.csv` — you just list fewer `Page` rows per site (e.g. only `Login` + `AccountsOverview`, skip the rest). Since it's a different file, your full `Site-Config.csv` is untouched.
 - Produces **Excel only** — no `.docx`, so Word isn't even required to run this script. The Excel sheet (`QuickCheckResults.xlsx`) has just: `Site`, `Page` (holds `LOGIN`/`LOGOUT`/`SITE-LEVEL` for those special rows, or the page name), `URL`, `Status`, `TimeTakenSec`, `Error` — same color-coded Success/Failure/Error/Skipped as before.
 - Footer/server-tag capture (`FooterCaptureSelector`, `CaptureFooterScreenshot`) works exactly as in the main script, including multiple different tags across different pages of the same site (e.g. Login shows `S09`, Account Overview shows `S14`) — each gets its own tagged screenshot file in `Screenshots\`. The captured text itself isn't a separate Excel column here (keeps the sheet to the essentials above); read it off the screenshot filename or reuse the full script's Excel output (which does include a `CapturedInfo` column) if you need it in a spreadsheet cell too.
+- Also writes an **"ROI Summary"** worksheet, same as the main script — see **ROI / business-value estimate** above. Same `-ManualMinutesPerCheck` / `-RunsPerDay` / `-HourlyRate` / `-CurrencySymbol` parameters apply here too.
 
 **Run it:**
 ```powershell
