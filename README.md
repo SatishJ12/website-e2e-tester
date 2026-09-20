@@ -5,14 +5,16 @@
 website-e2e-tester/
 ├── scripts/
 │   ├── Run-WebsiteE2ETests.ps1
-│   ├── Run-QuickSiteCheck.ps1   ← lightweight variant: Excel only, only the pages you list per site
-│   └── Update-ChromeDriver.ps1  ← run this whenever Chrome auto-updates and the driver falls out of sync
+│   ├── Run-QuickSiteCheck.ps1    ← lightweight variant: Excel only, only the pages you list per site
+│   ├── Run-SiteAuditReport.ps1   ← same full run, audit-style Excel: Pass/Fail, Start/End time, duration per website
+│   └── Update-ChromeDriver.ps1   ← run this whenever Chrome auto-updates and the driver falls out of sync
 ├── config/
-│   ├── Site-Config.csv         ← fill in with your real 6-7 sites, full page lists
+│   ├── Site-Config.csv         ← fill in with your real 6-7 sites, full page lists (used by the main script AND Run-SiteAuditReport.ps1)
 │   ├── Site-Config-Demo.csv    ← public sandbox sites, for trial runs
 │   └── QuickCheck-Config.csv   ← same column format, but only the pages you want in a quick check
 ├── TestRun_*/                  ← auto-created per run of Run-WebsiteE2ETests.ps1, gitignored
 ├── QuickCheck_*/                ← auto-created per run of Run-QuickSiteCheck.ps1, gitignored
+├── AuditRun_*/                  ← auto-created per run of Run-SiteAuditReport.ps1, gitignored
 └── .gitignore
 ```
 Everything here runs locally against your own Windows machine — nothing runs in a cloud sandbox, so test it on your PC before pushing to GitHub. Credentials are never written to disk — the script prompts for username/password fresh every run, for every site (see "Credentials" below).
@@ -259,6 +261,38 @@ Wrap the `.ps1` call in a Windows Task Scheduler job so it can run on a timer in
 Same flags as the main script (`-ConfigPath`, `-OutputFolder`, `-Headless`), same exit-code behavior (`0` clean, `1` if anything Failed/Errored) for Task Scheduler/CI use.
 
 **Building your `QuickCheck-Config.csv`**: copy just the `Login` row and the specific `Page` row(s) you care about from `Site-Config.csv` for each site — the column layout is identical, so no translation needed. Leave `LogoutSelector` blank on a site if you don't want it to bother logging out for a quick check (or keep it if you'd rather always close the session cleanly).
+
+## Site Audit Report (Pass/Fail, timestamps, per-website duration)
+`scripts\Run-SiteAuditReport.ps1` is another sibling of the main script — same automation, same Word report, same footer/server-tag capture, same ROI Summary worksheet — but a differently-shaped **Excel** report, built for an audit-style record rather than a quick scan.
+
+**What's different from `Run-WebsiteE2ETests.ps1`:**
+- Uses the **same engine and the same config file** — `config\Site-Config.csv` by default, no separate config needed. Logs into every site, visits every configured page, logs out — full run, same as the main script.
+- Still produces the **Word report** (`TestReport.docx`), with the same screenshots, footer screenshots, and captured server-tag info per row.
+- The **Excel** report (`TestResults.xlsx`, `Results` sheet) uses a different column set:
+
+  | Column | Meaning |
+  |---|---|
+  | `Site_Name` | Same as `Site` elsewhere in this project |
+  | `RowType` | Holds `LOGIN`, `LOGOUT`, `SITE-LEVEL`, `CONFIG`, or the configured page name — same convention as the `Page` column in the other scripts, just relabeled |
+  | `URL` | The URL for that step |
+  | `Status` | **`Pass`** / **`Fail`** / `Error` / `Skipped` — note this script uses `Pass`/`Fail` instead of `Success`/`Failure` used elsewhere in this project |
+  | `Start_Time` / `End_Time` | Timestamp for when that specific row's step began and ended (not just one timestamp per row, like the other scripts) |
+  | `Duration(Per website)` | **The same value repeated on every row for that site** — total elapsed time for the whole site (login through logout), not that individual row's own step time. Look at the Login row's `Start_Time` and the Logout row's `End_Time` for that site to see the window this duration covers |
+  | `Error` | Same as elsewhere |
+
+  Color-coding: `Pass` = green, `Fail` = yellow, `Error` = pink, `Skipped` = gray — same scheme, new labels.
+- Also writes the **"ROI Summary"** worksheet, same as the main script — see **ROI / business-value estimate** above. Same `-ManualMinutesPerCheck` / `-RunsPerDay` / `-HourlyRate` / `-CurrencySymbol` parameters apply here too.
+
+**Run it:**
+```powershell
+.\scripts\Run-SiteAuditReport.ps1 -ConfigPath .\config\Site-Config.csv -Headless:$false
+```
+Same flags as the main script. Output goes to a separate `AuditRun_*\` folder (gitignored), so it never collides with `TestRun_*\` or `QuickCheck_*\` from the other two scripts.
+
+**When to use which script** — quick reference:
+- **`Run-WebsiteE2ETests.ps1`** — full daily/incident run, Word + Excel, `Success`/`Failure`/`Error` labels, per-step duration
+- **`Run-QuickSiteCheck.ps1`** — fast spot-check of a handful of pages, Excel only, no Word
+- **`Run-SiteAuditReport.ps1`** — full run like the main script, but Excel formatted as an audit trail: `Pass`/`Fail` labels, explicit Start/End timestamps per row, and total time-per-website instead of time-per-page
 
 ## Troubleshooting
 
